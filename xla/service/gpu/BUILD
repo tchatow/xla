@@ -1565,6 +1565,7 @@ cc_library(
         "//xla/stream_executor:platform_manager",
         "//xla/translate/hlo_to_mhlo:hlo_utils",
         "//xla/translate/mhlo_to_hlo:location_exporter",
+        "//xla/tsl/lib/monitoring:counter",
         "//xla:autotune_results_proto_cc",
         "//xla:debug_options_flags",
         "//xla:shape_util",
@@ -1573,7 +1574,6 @@ cc_library(
         "//xla:util",
         "//xla:xla_data_proto_cc",
         "//xla:xla_proto_cc",
-        "@tsl//tsl/lib/monitoring:counter",
         "@tsl//tsl/platform:blocking_counter",
         "@tsl//tsl/platform:casts",
         "@tsl//tsl/platform:env",
@@ -2603,9 +2603,9 @@ cc_library(
     srcs = ["metrics.cc"],
     hdrs = ["metrics.h"],
     deps = [
-        "@tsl//tsl/lib/monitoring:counter",
-        "@tsl//tsl/lib/monitoring:gauge",
-        "@tsl//tsl/lib/monitoring:sampler",
+        "//xla/tsl/lib/monitoring:counter",
+        "//xla/tsl/lib/monitoring:gauge",
+        "//xla/tsl/lib/monitoring:sampler",
     ],
 )
 
