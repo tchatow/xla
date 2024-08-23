@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "xla/backends/profiler/gpu/cupti_collector.h"
 
+#include <optional>
 #include <queue>
 
 #include "absl/container/flat_hash_map.h"
@@ -314,6 +315,15 @@ class PerDeviceCollector {
     return ret_val;
   }
 
+  std::optional<std::string> GetDeviceName(CUdevice device) {
+    char device_name[512];
+    if (cuDeviceGetName(device_name, sizeof(device_name), device) !=
+        CUDA_SUCCESS) {
+      return std::nullopt;
+    }
+    return std::string(device_name);
+  }
+
   std::string GetDeviceXLineName(
       int64_t stream_id,
       absl::flat_hash_set<CuptiTracerEventType>& event_types) {
@@ -381,6 +391,13 @@ class PerDeviceCollector {
 
     CUdevice device;
     if (cuDeviceGet(&device, device_ordinal) != CUDA_SUCCESS) return;
+
+    auto device_name = GetDeviceName(device);
+    if (!device_name) {
+      device_plane->AddStatValue(*device_plane->GetOrCreateStatMetadata(
+                                     GetStatTypeStr(StatType::kGpuDeviceName)),
+                                 device_name);
+    }
 
     auto clock_rate_in_khz =
         GetDeviceAttribute(device, CU_DEVICE_ATTRIBUTE_CLOCK_RATE);

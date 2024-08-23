@@ -277,6 +277,7 @@ enum StatType {
   kHloProto,
   // Device capability related.
   kDevCapClockRateKHz,
+  // For GPU, this is the number of SMs. For TPU, this is the number of cores.
   kDevCapCoreCount,
   kDevCapMemoryBandwidth,
   kDevCapMemorySize,
@@ -324,7 +325,8 @@ enum StatType {
   kDroppedTraces,
   kCudaGraphId,
   kCudaGraphDetails,
-  kLastStatType = kCudaGraphDetails,
+  kGpuDeviceName,
+  kLastStatType = kGpuDeviceName,
 };
 
 enum MegaScaleStatType : uint8_t {
