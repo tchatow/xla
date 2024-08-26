@@ -154,10 +154,14 @@ def ExpandFloatOpsPass : Pass<"xla-gpu-expand-float-ops", "mlir::ModuleOp"> {
     "mlir::arith::ArithDialect", "mlir::math::MathDialect",
     "mlir::mhlo::MhloDialect"
   ];
+}
 
-  let options = [
-    Option<"pre_ampere_", "pre-ampere", "bool", /*default=*/"false",
-           "Rewrite ops that are not supported on architectures before Ampere">,
+def ConvertFloatNvidiaPass : Pass<"xla-gpu-convert-float-nvidia", "mlir::ModuleOp"> {
+  let summary = "Convert floating point types using NVidia intrinsics.";
+
+  let dependentDialects = [
+    "mlir::LLVM::LLVMDialect",
+    "mlir::arith::ArithDialect",
   ];
 }
 

@@ -1,4 +1,5 @@
 load("//xla:xla.bzl", "xla_cc_test")
+load("@tsl//tsl/platform/default:cuda_build_defs.bzl", "if_cuda_is_configured")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -149,6 +150,7 @@ cc_library(
     name = "mlir_fusion_emitter",
     srcs = ["mlir_fusion_emitter.cc"],
     hdrs = ["mlir_fusion_emitter.h"],
+    local_defines = if_cuda_is_configured(["GOOGLE_CUDA=1"]),
     deps = [
         ":computation_partitioner",
         ":elemental_hlo_to_mlir",
@@ -176,6 +178,8 @@ cc_library(
         "//xla/service/gpu/runtime:kernel_thunk",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/stream_executor:device_description",
+        "//xla/stream_executor:semantic_version",
+        "//xla/stream_executor/cuda:cuda_asm_compiler",
         "//xla/tsl/framework/mlir:status_scoped_diagnostic_handler",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",

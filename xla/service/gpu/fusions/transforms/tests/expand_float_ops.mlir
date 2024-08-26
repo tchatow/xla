@@ -1,5 +1,4 @@
-// RUN: mlir_fusions_opt %s -split-input-file -xla-gpu-expand-float-ops="pre-ampere=true" -canonicalize | FileCheck %s
-// RUN: mlir_fusions_opt %s -split-input-file -xla-gpu-expand-float-ops="pre-ampere=false" -canonicalize | FileCheck %s
+// RUN: mlir_fusions_opt %s -split-input-file -xla-gpu-expand-float-ops -canonicalize | FileCheck %s
 
 module {
   func.func @tanh(%arg0: f32) -> f32 {
@@ -90,9 +89,9 @@ module {
 // -----
 
 module {
-  func.func @double_to_f8(%arg0: f64) -> f8E5M2 {
-    %ret = arith.truncf %arg0 : f64 to f8E5M2
-    return %ret : f8E5M2
+  func.func @double_to_f8(%arg0: f64) -> f8E5M2FNUZ {
+    %ret = arith.truncf %arg0 : f64 to f8E5M2FNUZ
+    return %ret : f8E5M2FNUZ
   }
 }
 
