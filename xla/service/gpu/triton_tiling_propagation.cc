@@ -811,13 +811,17 @@ DimOrderMapOrError GetPropagatedDimOrders(const HloInstruction& hlo,
                                           const TransformDirection direction,
                                           const DimensionOrder& src_dim_order,
                                           const DotProperties& properties) {
-  VLOG(7) << "Analyzing " << hlo.ToString();
+  LOG(ERROR) << "Analyzing " << hlo.ToString();
   if (hlo.opcode() != HloOpcode::kParameter &&
       direction == TransformDirection::kOutputToInput &&
       absl::c_any_of(hlo.users(), [](const HloInstruction* user) {
+        LOG(ERROR)
+            << "Expect User hlo as Concatenate or DynamicSlice but User is: "
+            << user->ToString();
         return (user->opcode() == HloOpcode::kConcatenate ||
                 user->opcode() == HloOpcode::kDynamicSlice);
       })) {
+    LOG(ERROR) << "No fusion into concatenations or dynamic slice.";
     return "No fusion into concatenations or dynamic slice.";
   }
   if (hlo.opcode() == HloOpcode::kParameter ||
@@ -830,6 +834,7 @@ DimOrderMapOrError GetPropagatedDimOrders(const HloInstruction& hlo,
                                                   properties);
   } else if (hlo.opcode() == HloOpcode::kBroadcast) {
     if (direction != TransformDirection::kOutputToInput) {
+      LOG(ERROR) << "Unsupported broadcast direction.";
       return "Unsupported broadcast direction.";
     }
     return GetPropagatedDimOrdersForDimAlteringOp(hlo, direction, src_dim_order,
@@ -838,6 +843,7 @@ DimOrderMapOrError GetPropagatedDimOrders(const HloInstruction& hlo,
     // Pad ops are only supported when they are generated as part of the split-k
     // transform of dot fusions.
     if (direction != TransformDirection::kOutputToInput) {
+      LOG(ERROR) << "Unsupported pad direction.";
       return "Unsupported pad direction.";
     }
     return GetPropagatedDimOrdersForDimAlteringOp(hlo, direction, src_dim_order,
@@ -852,6 +858,7 @@ DimOrderMapOrError GetPropagatedDimOrders(const HloInstruction& hlo,
   } else if (hlo.opcode() == HloOpcode::kSlice) {
     // TODO(b/316637896) Add support for slices in softmax.
     if (direction != TransformDirection::kOutputToInput) {
+      LOG(ERROR) << "Unsupported slice direction.";
       return "Unsupported slice direction.";
     }
 
@@ -863,6 +870,7 @@ DimOrderMapOrError GetPropagatedDimOrders(const HloInstruction& hlo,
             *Cast<HloDynamicSliceInstruction>(&hlo));
         !decision.CanFuse()) {
       // CodegenDecision is actually the same type as FusionDecision.
+      LOG(ERROR) << "Decission:" << decision.Explain();
       return decision;
     }
 
@@ -870,6 +878,7 @@ DimOrderMapOrError GetPropagatedDimOrders(const HloInstruction& hlo,
                                                   properties);
   } else if (hlo.opcode() == HloOpcode::kReshape) {
     if (!ShapeUtil::ReshapeIsBitcast(hlo.operand(0)->shape(), hlo.shape())) {
+      LOG(ERROR) << "Non-bitcast reshape.";
       return "Non-bitcast reshape.";
     }
     return GetPropagatedDimOrdersForBitcast(hlo, direction, src_dim_order,
@@ -885,6 +894,8 @@ DimOrderMapOrError GetPropagatedDimOrders(const HloInstruction& hlo,
     if (noncontracting_dim_fragment_order_it !=
         src_dim_fragments_orders.end()) {
       if (noncontracting_dim_fragment_order_it->second.size() > 1) {
+        LOG(ERROR) << "Concatenations on split non-contracting dimensions are "
+                      "unsupported.";
         return "Concatenations on split non-contracting dimensions are "
                "unsupported.";
       }
@@ -893,6 +904,7 @@ DimOrderMapOrError GetPropagatedDimOrders(const HloInstruction& hlo,
     auto dim = LogicalIndexOfLabeledDimension(hlo.shape(), src_dim_order,
                                               noncontracting_dim_label);
     if (!dim.has_value() || dim.value() != hlo.concatenate_dimension()) {
+      LOG(ERROR) << "Unsupported concatenation.";
       return "Unsupported concatenation.";
     }
     if (absl::c_any_of(hlo.operands(), [&hlo](const HloInstruction* operand) {
@@ -907,12 +919,15 @@ DimOrderMapOrError GetPropagatedDimOrders(const HloInstruction& hlo,
                      kMinConcatFragmentSize !=
                  0;
         })) {
+      LOG(ERROR) << "At least one operand of concatenation can not be "
+                    "perfectly tiled.";
       return FusionDecision(
           "At least one operand of concatenation can not be perfectly tiled.");
     }
     return GetPropagatedDimOrdersForDimAlteringOp(hlo, direction, src_dim_order,
                                                   properties);
   }
+  LOG(ERROR) << "Unimplemented instruction: " << hlo.ToString();
   return "Unimplemented instruction.";
 }
 
@@ -939,17 +954,24 @@ constexpr int kIoToleranceBytes = 1024;
 
 // Tells that fusing an instruction as an input is efficient.
 bool IsInputWorthFusing(const HloInstruction& hlo) {
+  LOG(ERROR) << "IsInputWorthFusing?: " << hlo.ToString();
   if (InputMinusOutputBytes(hlo) <= kIoToleranceBytes) {
+    LOG(ERROR) << "True: InputMinusOutputBytes: " << InputMinusOutputBytes(hlo);
     return true;
   }
   if (hlo.user_count() > 1) {
+    LOG(ERROR) << "False: User count: " << hlo.user_count();
     return false;
   }
   if (hlo.opcode() == HloOpcode::kSlice &&
       hlo_query::AllOperandsAreParametersOrConstants(hlo)) {
+    LOG(ERROR) << "True: Slice with parameters or constants";
     return true;
   }
-  return hlo_query::AllOperandsAreParametersOrConstantsWithSingleUser(hlo);
+  auto decision =
+      hlo_query::AllOperandsAreParametersOrConstantsWithSingleUser(hlo);
+  LOG(ERROR) << "Decision: " << decision;
+  return decision;
 }
 
 // Tells that fusing an instruction as an output is efficient.
@@ -1004,38 +1026,46 @@ GetPropagatedDimOrdersAndRequirementsIfProfitablyFusible(
 
   if (hlo.opcode() == HloOpcode::kTuple ||
       hlo.opcode() == HloOpcode::kGetTupleElement) {
+    LOG(ERROR) << "Unsupported instruction: " << hlo.ToString();
     return "Unsupported instruction.";
   }
   if (hlo.opcode() == HloOpcode::kReduce) {
+    LOG(ERROR) << "Reductions are not fused yet: " << hlo.ToString();
     return "Reductions are not fused yet.";
   }
   if (hlo.opcode() == HloOpcode::kPad) {
+    LOG(ERROR) << "Pads are not fused yet: " << hlo.ToString();
     return "Pads are not fused yet.";
   }
   if (auto decision =
           legacy_triton::IsTritonSupportedInstruction(hlo, gpu_version);
       !decision.CanFuse()) {
+    LOG(ERROR) << "Unsupported instruction: " << hlo.ToString();
     return decision;
   }
   DimOrdersAndReqsOrError result_or_error =
       GetPropagatedDimOrdersAndRequirements(hlo, src_dim_order,
                                             transform_direction, properties);
   if (!std::holds_alternative<DimOrdersAndReqs>(result_or_error)) {
+    LOG(ERROR) << "No DimOrdersAndReqs: " << hlo.ToString();
     return result_or_error;
   }
   DimOrdersAndReqs dim_orders_and_requirements =
       std::move(std::get<DimOrdersAndReqs>(result_or_error));
   int fusion_level =
       hlo.GetModule()->config().debug_options().xla_gpu_triton_fusion_level();
+  LOG(ERROR) << "fusion_level: " << fusion_level;
   // TODO(ROCm): Check fusion level for ROCm.
   if (transform_direction == TransformDirection::kOutputToInput) {
     if (fusion_level < 2) {
       if (hlo.opcode() == HloOpcode::kConvert) {
         if (FusionDecision decision = IsConversionWorthFusing(hlo, gpu_version);
             !decision) {
+          LOG(ERROR) << "Not fusing conversion: " << hlo.ToString();
           return decision;
         }
       } else if (hlo.IsElementwise() && hlo.opcode() != HloOpcode::kCopy) {
+        LOG(ERROR) << "Ignored elementwise operation: " << hlo.ToString();
         return "Ignored elementwise operation";
       }
     } else {
@@ -1062,11 +1092,13 @@ GetPropagatedDimOrdersAndRequirementsIfProfitablyFusible(
         }
       }
       if (!accepted && !IsInputWorthFusing(hlo)) {
+        LOG(ERROR) << "Not fusing as input: " << hlo.ToString();
         return "Not obviously profitable to fuse as input.";
       }
     }
   } else {
     if (fusion_level < 2) {
+      LOG(ERROR) << "Skipping fusing outputs at low fusion levels.";
       return "Skipping fusing outputs at low fusion levels.";
     }
     for (int i = 0; i < hlo.operand_count(); ++i) {
@@ -1082,9 +1114,12 @@ GetPropagatedDimOrdersAndRequirementsIfProfitablyFusible(
           operand->opcode() == HloOpcode::kParameter) {
         continue;
       }
+      LOG(ERROR) << "Has multiple inputs - not properly analyzed yet.";
       return "Has multiple inputs - not properly analyzed yet.";
     }
     if (!IsOutputWorthFusing(hlo)) {
+      LOG(ERROR) << "Not obviously profitable to fuse as output: "
+                 << hlo.ToString();
       return "Not obviously profitable to fuse as output.";
     }
   }

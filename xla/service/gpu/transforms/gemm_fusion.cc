@@ -224,12 +224,14 @@ std::optional<DimOrdersAndReqs> GetOperandDimOrdersAndCombinedReqsIfProfitable(
           /*src_operand_index=*/std::nullopt, dim_order, gpu_version,
           properties);
   if (!std::holds_alternative<DimOrdersAndReqs>(dim_orders_and_new_reqs)) {
+    LOG(ERROR) << "Not profitable.DimOrdersAndReqs: " << hlo.ToString();
     return std::nullopt;
   }
   DotRequirementsOrError combined_reqs = CombineDotRequirements(
       requirements,
       std::get<DimOrdersAndReqs>(dim_orders_and_new_reqs).requirements);
   if (!std::holds_alternative<DotRequirements>(combined_reqs)) {
+    LOG(ERROR) << "Not profitable.DotRequirements: " << hlo.ToString();
     return std::nullopt;
   }
   return DimOrdersAndReqs{
@@ -339,6 +341,7 @@ FusionPlanAndRequirements BuildFusionPlanTowardOperands(
     }
     num_requeued = 0;
     if (original_hlo.opcode() == HloOpcode::kParameter) {
+      LOG(ERROR) << "Adding parameter: " << original_hlo.ToString();
       CHECK(fusion_plan_map
                 .insert({node_id, {&original_hlo, /*should_fuse=*/false}})
                 .second);
@@ -347,9 +350,11 @@ FusionPlanAndRequirements BuildFusionPlanTowardOperands(
     auto opt_result = GetOperandDimOrdersAndCombinedReqsIfProfitable(
         original_hlo, dim_order, properties, gpu_version, combined_reqs);
     if (!opt_result.has_value()) {
+      LOG(ERROR) << "Not fusing: " << original_hlo.ToString();
       CHECK(fusion_plan_map
                 .insert({node_id, {&original_hlo, /*should_fuse=*/false}})
                 .second);
+
       continue;
     }
     const DimOrderMap operand_dim_orders = std::move(opt_result->dim_orders);
@@ -364,8 +369,8 @@ FusionPlanAndRequirements BuildFusionPlanTowardOperands(
           get_or_create_fusion_node(operand, operand_dim_order, &is_new_node);
       graph.AddArc(node_id, operand_node_id);
       if (is_new_node) {
-        VLOG(6) << "Enqueueing " << operand.ToString() << ":"
-                << operand_dim_order.ToString();
+        LOG(ERROR) << "Enqueueing " << operand.ToString() << ":"
+                   << operand_dim_order.ToString();
         inputs.insert(operand_node_id);
         queue.push(operand_node_id);
       }
@@ -418,6 +423,7 @@ HloInstruction& BuildFusionTowardOperandsImpl(
         original_hlo.CloneWithNewOperands(original_hlo.shape(), new_operands));
   } else {
     fusion_params.push_back(const_cast<HloInstruction*>(&original_hlo));
+    LOG(ERROR) << "Adding parameter: " << original_hlo.ToString();
     fused_hlo = builder.AddInstruction(HloInstruction::CreateParameter(
         fusion_params.size() - 1, original_hlo.shape(),
         absl::StrCat("parameter_", fusion_params.size() - 1)));
@@ -616,11 +622,11 @@ absl::StatusOr<FusionDecision> CreateDotFusion(
     HloComputation::Builder& builder,
     std::vector<HloInstruction*>& fusion_inputs,
     HloInstruction** fusion_output_ptr) {
-  VLOG(5) << dot.ToString();
+  LOG(ERROR) << dot.ToString();
   if (CodegenDecision is_supported =
           legacy_triton::IsTritonSupportedInstruction(dot, gpu_version);
       !is_supported) {
-    VLOG(3) << is_supported.Explain();
+    LOG(ERROR) << is_supported.Explain();
     return is_supported;
   }
 
@@ -628,10 +634,12 @@ absl::StatusOr<FusionDecision> CreateDotFusion(
   if (dot.sparse_operands()) {
     const SparsityDescriptor& descriptor = dot.sparsity().front();
     if (dot.sparse_operands() != 1 || descriptor.index() != 0) {
+      LOG(ERROR) << "Sparsity is only supported on left operand";
       return InvalidArgument("Sparsity is only supported on left operand");
     }
     if (descriptor.type() != SparsityType::SPARSITY_STRUCTURED_N_M ||
         descriptor.n() != 2 || descriptor.m() != 4) {
+      LOG(ERROR) << "Only 2:4 structured sparsity is supported";
       return InvalidArgument("Only 2:4 structured sparsity is supported");
     }
     // DotDimensionSorter pass makes sure the sparse dimension is minor.
@@ -641,9 +649,13 @@ absl::StatusOr<FusionDecision> CreateDotFusion(
   TF_ASSIGN_OR_RETURN(HlosAndRequirements lhs_hlos_and_reqs,
                       FuseDotOperand(dot, /*operand_index=*/0, gpu_version,
                                      builder, fusion_inputs));
+  LOG(ERROR) << "lhs_hlos_and_reqs.fused_hlo: "
+             << lhs_hlos_and_reqs.fused_hlo->ToString();
   TF_ASSIGN_OR_RETURN(HlosAndRequirements rhs_hlos_and_reqs,
                       FuseDotOperand(dot, /*operand_index=*/1, gpu_version,
                                      builder, fusion_inputs));
+  LOG(ERROR) << "rhs_hlos_and_reqs.fused_hlo: "
+             << rhs_hlos_and_reqs.fused_hlo->ToString();
   std::optional<const HloInstruction*> meta_hlo;
   if (dot.sparse_operands()) {
     TF_ASSIGN_OR_RETURN(HlosAndRequirements meta_hlos_and_reqs,
@@ -672,6 +684,26 @@ absl::StatusOr<FusionDecision> CreateDotFusion(
       dot.GetModule()->config().debug_options().xla_gpu_triton_gemm_any() ||
       dot.sparse_operands()) {
     return FusionDecision{};
+  }
+
+  // We cannot handle int4 parameters if the batch dimension is the minor one.
+  // The cost of analysis could be expensive, so we only do it if we have to.
+  bool has_int4_param =
+      absl::c_any_of(fusion_inputs, [](const HloInstruction* hlo) {
+        LOG(ERROR) << "params hlo: " << hlo->ToString();
+        return hlo->shape().element_type() == PrimitiveType::S4;
+      });
+  LOG(ERROR) << "has_int4_param: " << has_int4_param;
+  if (has_int4_param) {
+    // Trace the position of the batch dimension of the dot to the parameters.
+    auto analysis_or = TritonFusionAnalysis::Execute(dot);
+    if (analysis_or.ok()) {
+      const auto& analysis = analysis_or.value();
+      TF_RETURN_IF_ERROR(analysis.IsMinorBatchInt4Parameter(
+          dot, TritonFusionAnalysis::Scope::LHS));
+      TF_RETURN_IF_ERROR(analysis.IsMinorBatchInt4Parameter(
+          dot, TritonFusionAnalysis::Scope::RHS));
+    }
   }
 
   bool is_pure_matmul = true;
@@ -704,16 +736,21 @@ class GemmFusionVisitor : public DfsHloRewriteVisitor {
   // and replaces the original dot() with a call to the computation.
   absl::Status HandleDot(HloInstruction* dot) override {
     CHECK_EQ(dot->opcode(), HloOpcode::kDot);
+    LOG(ERROR) << "HandleDot: " << dot->ToString();
 
     int64_t gemm_rewrite_size_threshold =
         dot->GetModule()
             ->config()
             .debug_options()
             .xla_gpu_gemm_rewrite_size_threshold();
+    LOG(ERROR) << "gemm_rewrite_size_threshold: "
+               << gemm_rewrite_size_threshold;
     TF_ASSIGN_OR_RETURN(bool is_matmul_tiny,
                         IsMatrixMultiplicationTooSmallForRewriting(
                             *dot, gemm_rewrite_size_threshold));
+    LOG(ERROR) << "is_matmul_tiny: " << is_matmul_tiny;
     if (is_matmul_tiny && IsDotSupportedByClassicalEmitters(*dot)) {
+      LOG(ERROR) << "Skipping small matmul";
       return absl::OkStatus();
     }
 
@@ -721,6 +758,7 @@ class GemmFusionVisitor : public DfsHloRewriteVisitor {
     HloComputation::Builder builder(absl::StrCat(fusion_name, "_computation"));
     std::vector<HloInstruction*> fusion_inputs;
     HloInstruction* fusion_output = nullptr;
+    LOG(ERROR) << "CreateDotFusion";
     TF_ASSIGN_OR_RETURN(
         const FusionDecision should_fuse,
         CreateDotFusion(*Cast<HloDotInstruction>(dot), gpu_version_, builder,
@@ -790,22 +828,29 @@ bool ShouldTritonHandleGEMM(HloDotInstruction& dot,
                             const se::GpuComputeCapability& gpu_version) {
   std::vector<HloInstruction*> fusion_inputs;
   HloComputation::Builder builder("disposable");
-  return CreateDotFusion(dot, gpu_version, builder, fusion_inputs,
-                         /*fusion_output_ptr=*/nullptr)
-      ->CanFuse();
+  auto decission = CreateDotFusion(dot, gpu_version, builder, fusion_inputs,
+                                   /*fusion_output_ptr=*/nullptr);
+  LOG(ERROR) << "decission: " << decission.status();
+  if (decission.ok()) {
+    // LOG(ERROR) << "ShouldTritonHandleGEMM: " << decission->Explain();
+  }
+  return decission->CanFuse();
 }
 
 absl::StatusOr<bool> GemmFusion::Run(
     HloModule* module,
     const absl::flat_hash_set<absl::string_view>& execution_threads) {
+  LOG(ERROR) << "GemmFusion::Run";
   TF_RETURN_IF_ERROR(
       EnsureTritonSupportsComputeCapability(compute_capability_));
-
+  LOG(ERROR) << "GemmFusion::Run after EnsureTritonSupportsComputeCapability";
   bool changed = false;
   for (HloComputation* computation :
        module->MakeNonfusionComputations(execution_threads)) {
+    LOG(ERROR) << "computation: " << computation->ToString();
     TF_ASSIGN_OR_RETURN(bool result,
                         RunOnComputation(computation, compute_capability_));
+    LOG(ERROR) << "result: " << result;
     changed |= result;
   }
   return changed;

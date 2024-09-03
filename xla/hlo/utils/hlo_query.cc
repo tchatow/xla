@@ -20,6 +20,7 @@ limitations under the License.
 #include <utility>
 
 #include "absl/algorithm/container.h"
+#include "absl/log/log.h"
 #include "absl/strings/string_view.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_instruction.h"
@@ -90,9 +91,12 @@ bool AllOperandsAreParametersOrConstantsWithSingleUser(
   for (const auto& operand : instruction.operands()) {
     if (operand->opcode() != HloOpcode::kParameter &&
         operand->opcode() != HloOpcode::kConstant) {
+      LOG(ERROR) << "Operand is not a parameter or constant: "
+                 << operand->ToString();
       return false;
     }
     if (operand->user_count() > 1) {
+      LOG(ERROR) << "Operand has multiple users: " << operand->ToString();
       return false;
     }
   }
