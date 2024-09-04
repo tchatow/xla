@@ -36,6 +36,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
+#include "third_party/cppitertools/reversed.hpp"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
@@ -1017,8 +1018,11 @@ absl::StatusOr<bool> HostOffloader::Run(
   // it, we need to re-run the loop.
   do {
     changed_in_loop = false;
+    // Iterate over the computations in the order that they are executed. This
+    // ensures we process "MoveToHost" instructions that are at the beginning of
+    // a host memory offload instruction chain.
     for (HloComputation* computation :
-         module->MakeComputationPostOrder(execution_threads)) {
+         iter::reversed(module->MakeComputationPostOrder(execution_threads))) {
       for (HloInstruction* instruction :
            computation->MakeInstructionPostOrder()) {
         if (instruction->IsCustomCall(
