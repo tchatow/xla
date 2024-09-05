@@ -52,6 +52,7 @@ class MemorySpaceAssignmentCostAnalysisTest : public HloTestBase {
     options_.async_copy_bandwidth_bytes_per_second = 32;
     options_.pipeline_overhead_window_size_mib =
         pipeline_overhead_window_size_mib;
+    options_.min_compute_latency_second = 1;
     options.shape_size = ShapeSize;
     options.set_flops_per_second(8);
     options.set_bytes_per_second(32);
@@ -91,7 +92,8 @@ TEST_F(MemorySpaceAssignmentCostAnalysisTest, NoPipelineOverhead) {
 
   const HloInstruction* add = module->entry_computation()->root_instruction();
   const float expected_compute_elapsed =
-      /*num_flops=*/8 / /*flops_per_second=*/8.0;
+      std::max(/*num_flops=*/8.0f / /*flops_per_second=*/8.0f,
+               options_.min_compute_latency_second);
   LOG(INFO) << "Expected compute elapsed = " << expected_compute_elapsed;
   EXPECT_EQ(cost_analysis_->GetInstructionElapsedDueToCompute(*add),
             expected_compute_elapsed);
@@ -162,7 +164,8 @@ TEST_F(MemorySpaceAssignmentCostAnalysisTest, PipelineOverhead) {
 
   const HloInstruction* add = module->entry_computation()->root_instruction();
   const float expected_compute_elapsed =
-      /*num_flops=*/8 / /*flops_per_second=*/8.0;
+      std::max(/*num_flops=*/8.0f / /*flops_per_second=*/8.0f,
+               options_.min_compute_latency_second);
   LOG(INFO) << "Expected compute elapsed = " << expected_compute_elapsed;
   EXPECT_EQ(cost_analysis_->GetInstructionElapsedDueToCompute(*add),
             expected_compute_elapsed);
@@ -227,6 +230,33 @@ TEST_F(MemorySpaceAssignmentCostAnalysisTest, PipelineOverhead) {
             expected_memory_elapsed);
   EXPECT_EQ(cost_analysis_->GetInstructionElapsedInAlternateMemory(
                 *add, {{0, {}}, {1, {}}}, {{}}),
+            expected_compute_elapsed);
+}
+
+TEST_F(MemorySpaceAssignmentCostAnalysisTest, LatencyBoundCompute) {
+  absl::string_view hlo_string = R"(
+  HloModule module, is_scheduled=true
+
+  ENTRY Entry {
+    param0 = f32[2,2] parameter(0)
+    param1 = f32[2,2] parameter(1)
+    ROOT add = f32[2,2] add(param0, param1)
+  }
+  )";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+  TF_ASSERT_OK(Initialize(module.get()));
+
+  const HloInstruction* add = module->entry_computation()->root_instruction();
+  CostAnalysisOptions options;
+  float throughput_based_compute_time =
+      /*num_flops=*/4 / /*flops_per_second=*/8.0;
+  const float expected_compute_elapsed = std::max(
+      throughput_based_compute_time, options_.min_compute_latency_second);
+  LOG(INFO) << "Throughput based compute time = "
+            << throughput_based_compute_time;
+  LOG(INFO) << "Expected compute elapsed = " << expected_compute_elapsed;
+  EXPECT_EQ(cost_analysis_->GetInstructionElapsedDueToCompute(*add),
             expected_compute_elapsed);
 }
 

@@ -63,6 +63,9 @@ struct CostAnalysisOptions {
 
   // Scales effective bandwidth for async copies. Valid range is (0, 1].
   float async_copy_bandwidth_scaling_factor = 1.0;
+
+  // Instructions cannot finish faster than a factor of cycle time
+  float min_compute_latency_second = 0.0f;
 };
 
 // An interface for getting basic HLO costs.

@@ -363,7 +363,8 @@ float CostAnalysis::GetInstructionElapsedDueToCompute(
   if (ExcludeInstructionFromElapsed(instruction)) {
     return 0.0f;
   }
-  return base_costs_.ComputeSeconds(instruction);
+  return std::max(base_costs_.ComputeSeconds(instruction),
+                  options_.min_compute_latency_second);
 }
 
 float CostAnalysis::GetInstructionElapsedDueToMemory(
