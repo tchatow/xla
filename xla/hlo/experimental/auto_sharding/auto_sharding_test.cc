@@ -1568,6 +1568,34 @@ ENTRY %module {
   EXPECT_THAT(gather, op::Sharding("{devices=[16,16]<=[256]}"));
 }
 
+TEST_F(AutoShardingTest, GatherTest2) {
+  const char* const hlo_string = R"(
+HloModule module
+
+ENTRY %module {
+  data = f32[1000]{0} parameter(0), sharding={replicated}
+  indices = s32[512,1280,8,1]{3,2,1,0} parameter(1), sharding={devices=[256,1,1,1]<=[256]}
+  ROOT gather = f32[512,1280,8,1]{3,2,1,0} gather(data, indices), offset_dims={3}, collapsed_slice_dims={}, start_index_map={0}, index_vector_dim=3, slice_sizes={1}
+}
+)";
+
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          ParseAndReturnVerifiedModule(hlo_string));
+  AutoShardingOption option;
+  option.enable = true;
+  option.device_mesh_shape = {256, 1};
+  option.device_mesh_alpha = {1.0, 1.0};
+  option.device_mesh_beta = {0.01, 1.0};
+  option.preserve_shardings =
+      AutoShardingOption::PreserveShardingsType::kKeepAllShardings;
+  TF_ASSERT_OK_AND_ASSIGN(bool changed, AutoSharding(option).Run(module.get()));
+  VLOG(0) << module->ToString();
+  EXPECT_TRUE(changed);
+  auto* gather = FindInstruction(module.get(), "gather");
+  ASSERT_NE(gather, nullptr);
+  EXPECT_THAT(gather, op::Sharding("{devices=[256,1,1,1]<=[256]}"));
+}
+
 TEST_F(AutoShardingTest, GatherTestNoReshard) {
   constexpr absl::string_view kHloString = R"(
 HloModule module
