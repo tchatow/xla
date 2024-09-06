@@ -1185,14 +1185,13 @@ absl::Status GpuDriver::AsynchronousMemsetUint32(Context* context,
   return absl::OkStatus();
 }
 
-bool GpuDriver::AddStreamCallback(Context* context, GpuStreamHandle stream,
-                                  StreamCallback callback, void* data) {
-  hipError_t res = wrap::hipLaunchHostFunc(stream, (hipHostFn_t)callback, data);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "unable to add host callback: " << ToString(res);
-    return false;
-  }
-  return true;
+absl::Status GpuDriver::AddStreamCallback(Context* context,
+                                          GpuStreamHandle stream,
+                                          StreamCallback callback, void* data) {
+  RETURN_IF_ROCM_ERROR(
+      wrap::hipLaunchHostFunc(stream, (hipHostFn_t)callback, data),
+      "unable to add host callback");
+  return absl::OkStatus();
 }
 
 absl::Status GpuDriver::GetModuleFunction(Context* context, hipModule_t module,
@@ -1428,16 +1427,13 @@ bool GpuDriver::GetEventElapsedTime(Context* context,
   return true;
 }
 
-bool GpuDriver::WaitStreamOnEvent(Context* context, GpuStreamHandle stream,
-                                  GpuEventHandle event) {
+absl::Status GpuDriver::WaitStreamOnEvent(Context* context,
+                                          GpuStreamHandle stream,
+                                          GpuEventHandle event) {
   ScopedActivateContext activation{context};
-  hipError_t res = wrap::hipStreamWaitEvent(stream, event, 0 /* = flags */);
-  if (res != hipSuccess) {
-    LOG(ERROR) << "could not wait stream on event: " << ToString(res);
-    return false;
-  }
-
-  return true;
+  RETURN_IF_ROCM_ERROR(wrap::hipStreamWaitEvent(stream, event, 0 /* = flags */),
+                       "could not wait stream on event");
+  return absl::OkStatus();
 }
 
 bool GpuDriver::SynchronizeContext(Context* context) {
@@ -1506,24 +1502,23 @@ absl::Status GpuDriver::SynchronousMemcpyH2D(Context* context,
   return absl::OkStatus();
 }
 
-bool GpuDriver::AsynchronousMemcpyD2H(Context* context, void* host_dst,
-                                      hipDeviceptr_t gpu_src, uint64_t size,
-                                      GpuStreamHandle stream) {
+absl::Status GpuDriver::AsynchronousMemcpyD2H(Context* context, void* host_dst,
+                                              hipDeviceptr_t gpu_src,
+                                              uint64_t size,
+                                              GpuStreamHandle stream) {
   ScopedActivateContext activation{context};
-  hipError_t res = wrap::hipMemcpyDtoHAsync(host_dst, gpu_src, size, stream);
-  if (res != hipSuccess) {
-    LOG(ERROR) << absl::StrFormat(
-        "failed to enqueue async memcpy from device to host: %s; host dst: %p; "
-        "Gpu src: %p; size: %llu=0x%llx",
-        ToString(res).c_str(), host_dst, absl::bit_cast<void*>(gpu_src), size,
-        size);
-    return false;
-  }
+  RETURN_IF_ROCM_ERROR(
+      wrap::hipMemcpyDtoHAsync(host_dst, gpu_src, size, stream),
+      absl::StrFormat(
+          "failed to enqueue async memcpy from device to host: host dst: %p; "
+          "Gpu src: %p; size: %llu=0x%llx",
+          host_dst, absl::bit_cast<void*>(gpu_src), size, size));
+
   VLOG(2) << "successfully enqueued async memcpy d2h of " << size
           << " bytes from " << absl::bit_cast<void*>(gpu_src) << " to "
           << host_dst << " on stream " << stream
           << " device: " << context->device_ordinal();
-  return true;
+  return absl::OkStatus();
 }
 
 absl::Status GpuDriver::AsynchronousMemcpyH2D(Context* context,

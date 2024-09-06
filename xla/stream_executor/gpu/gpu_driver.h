@@ -586,9 +586,9 @@ class GpuDriver {
   // -- Asynchronous memcopies.
   // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1g56f30236c7c5247f8e061b59d3268362
 
-  static bool AsynchronousMemcpyD2H(Context* context, void* host_dst,
-                                    GpuDevicePtr gpu_src, uint64_t size,
-                                    GpuStreamHandle stream);
+  static absl::Status AsynchronousMemcpyD2H(Context* context, void* host_dst,
+                                            GpuDevicePtr gpu_src, uint64_t size,
+                                            GpuStreamHandle stream);
   static absl::Status AsynchronousMemcpyH2D(Context* context,
                                             GpuDevicePtr gpu_dst,
                                             const void* host_src, uint64_t size,
@@ -612,14 +612,16 @@ class GpuDriver {
   // Enqueues a callback operation into stream.
   // See StreamCallback above and the NVIDIA documentation for additional
   // details.
-  static bool AddStreamCallback(Context* context, GpuStreamHandle stream,
-                                StreamCallback callback, void* data);
+  static absl::Status AddStreamCallback(Context* context,
+                                        GpuStreamHandle stream,
+                                        StreamCallback callback, void* data);
 
   // Causes stream to wait for event to trigger before proceeding via
   // cuStreamWaitEvent.
   // http://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__STREAM.html#axzz334nAXAhM
-  static bool WaitStreamOnEvent(Context* context, GpuStreamHandle stream,
-                                GpuEventHandle event);
+  static absl::Status WaitStreamOnEvent(Context* context,
+                                        GpuStreamHandle stream,
+                                        GpuEventHandle event);
 
   // Blocks the calling thread until the operations enqueued onto stream have
   // been completed, via cuStreamSynchronize.
