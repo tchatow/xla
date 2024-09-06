@@ -151,6 +151,26 @@ class BufferSequencingEvent {
     return defined_status_.IsConcrete() && !defined_status_.get().ok();
   }
 
+  // This is a combination of IsPredeterminedError() and DefinedOn() predicate
+  // with a single lock. This is needed in case a buffer is set as an error
+  // buffer in a different thread after IsPredeterminedError() check and before
+  // DefinedOn() check, in which case DefinedOn() would indefinitely wait since
+  // the event is never recorded when the buffer is predetermined error.
+  bool IsPredeterminedErrorOrDefinedOn(se::Stream* stream) {
+    absl::MutexLock lock(&mu_);
+    if (defined_status_.IsConcrete() && !defined_status_.get().ok()) {
+      // IsPredeterminedError
+      return true;
+    }
+
+    // Check whether the event is defined on `stream`. See
+    // BufferSequencingEvent::DefinedOn for more comments.
+    mu_.Await(
+        absl::Condition(this, &BufferSequencingEvent::EventHasBeenRecorded));
+    return std::find(streams_defined_on_.begin(), streams_defined_on_.end(),
+                     stream) != streams_defined_on_.end();
+  }
+
  private:
   bool EventHasBeenRecorded() const ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
   uint64_t sequence_number() const;
